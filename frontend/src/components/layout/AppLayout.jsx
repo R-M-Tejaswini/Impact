@@ -8,10 +8,15 @@ import {
   TrendingUp,
   Briefcase,
   Menu,
-  X
+  X,
+  Github,
+  FolderOpen,
+  Calendar,
+  Award,
+  Sparkles
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/components/ui/button'; // ✅ lowercase 'button'
 
 export function AppLayout({ title, subtitle, children }) {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
@@ -19,11 +24,15 @@ export function AppLayout({ title, subtitle, children }) {
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Work Items', href: '/work', icon: Briefcase },
+    { name: 'Work Items', href: '/work', icon: FileText },
     { name: 'Blockers', href: '/blockers', icon: AlertCircle },
+    { name: 'Projects', href: '/projects', icon: FolderOpen },
+    { name: 'Calendar', href: '/calendar', icon: Calendar },
+    { name: 'Skills', href: '/skills', icon: Award },
+    { name: 'Analytics', href: '/analytics', icon: TrendingUp },
     { name: 'Weekly Summary', href: '/summary', icon: FileText },
-    { name: '1-on-1 Prep', href: '/prep', icon: Target },
-    { name: 'Skills', href: '/skills', icon: TrendingUp },
+    { name: 'One-on-One Prep', href: '/prep', icon: Target },
+    { name: 'GitHub', href: '/github', icon: Github },
   ];
 
   return (

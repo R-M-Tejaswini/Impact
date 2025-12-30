@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import WorkEntry, Blocker, Skill, AISummary
+from .models import WorkEntry, Blocker, Skill, AISummary, Company, Project, CalendarEvent
 
 @admin.register(WorkEntry)
 class WorkEntryAdmin(admin.ModelAdmin):
@@ -23,3 +23,21 @@ class SkillAdmin(admin.ModelAdmin):
 class AISummaryAdmin(admin.ModelAdmin):
     list_display = ['week_start', 'created_at']
     list_filter = ['week_start']
+
+@admin.register(Company)
+class CompanyAdmin(admin.ModelAdmin):
+    list_display = ['name', 'role', 'start_date', 'is_active']
+    list_filter = ['is_active', 'start_date']
+    search_fields = ['name', 'role']
+
+@admin.register(Project)
+class ProjectAdmin(admin.ModelAdmin):
+    list_display = ['title', 'project_type', 'status', 'start_date', 'total_hours']
+    list_filter = ['project_type', 'status', 'start_date']
+    search_fields = ['title', 'description']
+
+@admin.register(CalendarEvent)
+class CalendarEventAdmin(admin.ModelAdmin):
+    list_display = ['title', 'event_type', 'start_time', 'is_completed']
+    list_filter = ['event_type', 'is_completed', 'start_time']
+    search_fields = ['title']

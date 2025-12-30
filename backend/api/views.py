@@ -3,23 +3,25 @@ from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.utils import timezone
 from datetime import datetime, timedelta
-from .services.github_service import GitHubService
-from .models import WorkEntry, Blocker, Skill, AISummary, GitHubIntegration
-from .serializers import WorkEntrySerializer, BlockerSerializer, SkillSerializer, AISummarySerializer
-from .services.gemini_ai import GeminiAIService
+from django.db import models
 import logging
 
 logger = logging.getLogger(__name__)
 
+# Import all models
+from .models import WorkEntry, Blocker, Skill, AISummary, GitHubIntegration, Company, Project, CalendarEvent
+from .serializers import WorkEntrySerializer, BlockerSerializer, SkillSerializer, AISummarySerializer, CompanySerializer, ProjectSerializer, CalendarEventSerializer
+from .services.gemini_ai import GeminiAIService
+
 class WorkEntryViewSet(viewsets.ModelViewSet):
-    queryset = WorkEntry.objects.all()
+    queryset = WorkEntry.objects.all().order_by('-created_at')  # ✅ Order by newest first
     serializer_class = WorkEntrySerializer
     
     @action(detail=False, methods=['get'])
     def weekly(self, request):
         """Get work entries from the past week"""
         week_ago = timezone.now() - timedelta(days=7)
-        entries = self.queryset.filter(created_at__gte=week_ago)
+        entries = self.queryset.filter(created_at__gte=week_ago).order_by('-created_at')
         serializer = self.get_serializer(entries, many=True)
         return Response(serializer.data)
     
@@ -35,7 +37,8 @@ class WorkEntryViewSet(viewsets.ModelViewSet):
         # Group by type
         type_breakdown = {}
         for entry in entries:
-            type_breakdown[entry.entry_type] = type_breakdown.get(entry.entry_type, 0) + entry.hours_spent
+            type_key = entry.entry_type or 'other'
+            type_breakdown[type_key] = type_breakdown.get(type_key, 0) + entry.hours_spent
         
         return Response({
             'total_hours': total_hours,
@@ -45,49 +48,132 @@ class WorkEntryViewSet(viewsets.ModelViewSet):
 
 
 class BlockerViewSet(viewsets.ModelViewSet):
-    queryset = Blocker.objects.all()
+    queryset = Blocker.objects.all().order_by('-created_at')
     serializer_class = BlockerSerializer
     
     @action(detail=False, methods=['get'])
     def active(self, request):
-        """Get only active blockers"""
-        blockers = self.queryset.filter(status='active')
-        serializer = self.get_serializer(blockers, many=True)
-        return Response(serializer.data)
-    
-    @action(detail=True, methods=['post'])
-    def resolve(self, request, pk=None):
-        """Mark a blocker as resolved"""
-        blocker = self.get_object()
-        blocker.status = 'resolved'
-        blocker.save()
-        serializer = self.get_serializer(blocker)
+        """Get active blockers only"""
+        active = self.queryset.filter(status='active').order_by('-created_at')
+        serializer = self.get_serializer(active, many=True)
         return Response(serializer.data)
 
 
 class SkillViewSet(viewsets.ModelViewSet):
-    queryset = Skill.objects.all()
+    queryset = Skill.objects.all().order_by('-confidence_level')  # ✅ Order by confidence
     serializer_class = SkillSerializer
+
+
+class ProjectViewSet(viewsets.ModelViewSet):
+    queryset = Project.objects.all().order_by('-start_date')  # ✅ Order by newest
+    serializer_class = ProjectSerializer
+    
+    @action(detail=False, methods=['get'])
+    def active(self, request):
+        """Get active projects"""
+        active = self.queryset.filter(status__in=['planning', 'in_progress']).order_by('-start_date')
+        serializer = self.get_serializer(active, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def completed(self, request):
+        """Get completed projects"""
+        completed = self.queryset.filter(status='completed').order_by('-actual_end_date')
+        serializer = self.get_serializer(completed, many=True)
+        return Response(serializer.data)
+
+
+class CalendarEventViewSet(viewsets.ModelViewSet):
+    queryset = CalendarEvent.objects.all().order_by('start_time')
+    serializer_class = CalendarEventSerializer
+    
+    @action(detail=False, methods=['get'])
+    def upcoming(self, request):
+        """Get upcoming events"""
+        now = timezone.now()
+        upcoming = self.queryset.filter(start_time__gte=now).order_by('start_time')
+        serializer = self.get_serializer(upcoming, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def week(self, request):
+        """Get events for this week"""
+        now = timezone.now()
+        week_start = now - timedelta(days=now.weekday())
+        week_end = week_start + timedelta(days=7)
+        week_events = self.queryset.filter(
+            start_time__gte=week_start,
+            start_time__lt=week_end
+        ).order_by('start_time')
+        serializer = self.get_serializer(week_events, many=True)
+        return Response(serializer.data)
+
+
+class CompanyViewSet(viewsets.ModelViewSet):
+    queryset = Company.objects.all()
+    serializer_class = CompanySerializer
+    
+    @action(detail=False, methods=['get'])
+    def active(self, request):
+        """Get active company"""
+        active = self.queryset.filter(is_active=True).first()
+        if active:
+            serializer = self.get_serializer(active)
+            return Response(serializer.data)
+        return Response(None)
+
+
+# AI & Analytics Endpoints
+@api_view(['GET'])
+def analytics_overview(request):
+    """Get comprehensive analytics overview"""
+    try:
+        month_ago = timezone.now() - timedelta(days=30)
+        
+        # Work distribution
+        entries = WorkEntry.objects.filter(created_at__gte=month_ago)
+        type_breakdown = {}
+        for entry in entries:
+            key = entry.entry_type or 'other'
+            type_breakdown[key] = type_breakdown.get(key, 0) + (entry.hours_spent or 0)
+        
+        # Project stats
+        active_projects = Project.objects.filter(status__in=['planning', 'in_progress']).count()
+        completed_projects = Project.objects.filter(status='completed').count()
+        
+        # Skill stats
+        total_skills = Skill.objects.count()
+        skills_agg = Skill.objects.aggregate(avg_confidence=models.Avg('confidence_level'))
+        avg_confidence = skills_agg['avg_confidence'] or 0
+        
+        return Response({
+            'work_distribution': type_breakdown,
+            'active_projects': active_projects,
+            'completed_projects': completed_projects,
+            'total_skills': total_skills,
+            'avg_skill_confidence': round(float(avg_confidence), 1),
+            'total_hours_month': sum(type_breakdown.values()),
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in analytics overview: {str(e)}", exc_info=True)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
 def generate_weekly_summary(request):
     """Generate AI-powered weekly summary"""
     try:
-        # Get work entries from past week
         week_ago = timezone.now() - timedelta(days=7)
-        entries = WorkEntry.objects.filter(created_at__gte=week_ago)
+        entries = WorkEntry.objects.filter(created_at__gte=week_ago).order_by('-created_at')
         blockers = Blocker.objects.filter(created_at__gte=week_ago)
         
-        # Serialize data
         entries_data = WorkEntrySerializer(entries, many=True).data
         blockers_data = BlockerSerializer(blockers, many=True).data
         
-        # Generate summary using Gemini
         ai_service = GeminiAIService()
         summary = ai_service.generate_weekly_summary(entries_data, blockers_data)
         
-        # Save summary
         ai_summary = AISummary.objects.create(
             week_start=week_ago.date(),
             summary_json=summary
@@ -99,6 +185,7 @@ def generate_weekly_summary(request):
         })
         
     except Exception as e:
+        logger.error(f"Error generating summary: {str(e)}", exc_info=True)
         return Response(
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -109,16 +196,19 @@ def generate_weekly_summary(request):
 def generate_one_on_one_prep(request):
     """Generate 1-on-1 preparation talking points"""
     try:
-        week_ago = timezone.now() - timedelta(days=7)
-        entries = WorkEntry.objects.filter(created_at__gte=week_ago)
+        # Get recent work
+        month_ago = timezone.now() - timedelta(days=30)
+        entries = WorkEntry.objects.filter(created_at__gte=month_ago).order_by('-created_at')[:20]
+        
+        # Get active blockers
         blockers = Blocker.objects.filter(status='active')
-        skills = Skill.objects.all()[:10]
+        
+        # Get all skills
+        skills = Skill.objects.all().order_by('-confidence_level')
         
         entries_data = WorkEntrySerializer(entries, many=True).data
         blockers_data = BlockerSerializer(blockers, many=True).data
         skills_data = SkillSerializer(skills, many=True).data
-        
-        logger.info(f"Skills data: {skills_data}")
         
         ai_service = GeminiAIService()
         prep = ai_service.generate_one_on_one_prep(entries_data, blockers_data, skills_data)
@@ -126,7 +216,7 @@ def generate_one_on_one_prep(request):
         return Response(prep)
         
     except Exception as e:
-        logger.error(f"Error in generate_one_on_one_prep: {str(e)}", exc_info=True)
+        logger.error(f"Error generating 1-on-1 prep: {str(e)}", exc_info=True)
         return Response(
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -135,38 +225,28 @@ def generate_one_on_one_prep(request):
 
 @api_view(['POST'])
 def extract_skills(request):
-    """Extract skills from recent work entries"""
+    """Extract skills from work entries"""
     try:
-        # Get entries from past month
-        month_ago = timezone.now() - timedelta(days=30)
-        entries = WorkEntry.objects.filter(created_at__gte=month_ago)
+        entries = WorkEntry.objects.all().order_by('-created_at')[:30]
         entries_data = WorkEntrySerializer(entries, many=True).data
         
-        # Extract skills using Gemini
         ai_service = GeminiAIService()
-        result = ai_service.extract_skills(entries_data)
+        extracted_skills = ai_service.extract_skills_from_entries(entries_data)
         
-        # Save/update skills in database
-        for skill_data in result.get('skills', []):
+        # Save extracted skills
+        for skill_name in extracted_skills:
             skill, created = Skill.objects.get_or_create(
-                skill_name=skill_data['name'],
-                defaults={
-                    'confidence_level': skill_data['confidence'],
-                    'times_mentioned': 1
-                }
+                skill_name=skill_name,
+                defaults={'confidence_level': 3}
             )
-            if not created:
-                skill.confidence_level = max(skill.confidence_level, skill_data['confidence'])
-                skill.times_mentioned += 1
-                skill.last_used = timezone.now()
-                skill.save()
         
         # Return all skills
-        skills = Skill.objects.all()
-        serializer = SkillSerializer(skills, many=True)
+        all_skills = Skill.objects.all().order_by('-confidence_level')
+        serializer = SkillSerializer(all_skills, many=True)
         return Response(serializer.data)
         
     except Exception as e:
+        logger.error(f"Error extracting skills: {str(e)}", exc_info=True)
         return Response(
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -174,83 +254,42 @@ def extract_skills(request):
 
 
 @api_view(['POST'])
-def connect_github(request):
-    """Save GitHub access token"""
-    token = request.data.get('access_token')
-    if not token:
-        return Response({'error': 'access_token required'}, status=400)
-    
+def analyze_skill_gaps(request):
+    """Analyze skill gaps"""
     try:
-        service = GitHubService(token)
-        user = service.get_user()
+        company = Company.objects.filter(is_active=True).first()
+        company_tech_stack = company.tech_stack if company else []
         
-        integration, created = GitHubIntegration.objects.update_or_create(
-            defaults={
-                'access_token': token,
-                'github_username': user['login'],
-                'connected_at': timezone.now()
-            }
-        )
+        skills = Skill.objects.all()
+        skills_data = SkillSerializer(skills, many=True).data
         
-        return Response({
-            'connected': True,
-            'username': user['login']
-        })
+        month_ago = timezone.now() - timedelta(days=30)
+        entries = WorkEntry.objects.filter(created_at__gte=month_ago)
+        entries_data = WorkEntrySerializer(entries, many=True).data
+        
+        ai_service = GeminiAIService()
+        analysis = ai_service.analyze_skill_gaps(skills_data, company_tech_stack, entries_data)
+        
+        return Response(analysis)
+        
     except Exception as e:
-        return Response({'error': str(e)}, status=400)
+        logger.error(f"Error in gap analysis: {str(e)}", exc_info=True)
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @api_view(['GET'])
-def github_status(request):
-    """Check if GitHub is connected"""
-    integration = GitHubIntegration.objects.first()
-    if integration:
-        return Response({
-            'connected': True,
-            'username': integration.github_username,
-            'last_sync': integration.last_sync
-        })
-    return Response({'connected': False})
-
-
-@api_view(['POST'])
-def sync_github(request):
-    """Sync GitHub commits as work entries"""
-    integration = GitHubIntegration.objects.first()
-    if not integration:
-        return Response({'error': 'GitHub not connected'}, status=400)
-    
+def list_summaries(request):
+    """Get all previous summaries"""
     try:
-        service = GitHubService(integration.access_token)
-        commits = service.get_recent_commits()
-        pr_stats = service.get_pr_stats()
-        
-        # Create work entries from commits
-        created_count = 0
-        for commit in commits:
-            # Avoid duplicates
-            existing = WorkEntry.objects.filter(
-                title__contains=commit['sha'],
-                source='github'
-            ).exists()
-            
-            if not existing:
-                WorkEntry.objects.create(
-                    title=f"[{commit['repo']}] {commit['message'][:100]}",
-                    description=f"Commit {commit['sha']} - {commit['url']}",
-                    hours_spent=0.5,  # Estimate
-                    entry_type='coding',
-                    source='github',
-                    tags=[commit['repo']]
-                )
-                created_count += 1
-        
-        integration.last_sync = timezone.now()
-        integration.save()
-        
-        return Response({
-            'commits_imported': created_count,
-            'pr_stats': pr_stats
-        })
+        summaries = AISummary.objects.all().order_by('-created_at')
+        serializer = AISummarySerializer(summaries, many=True)
+        return Response(serializer.data)
     except Exception as e:
-        return Response({'error': str(e)}, status=500)
+        logger.error(f"Error listing summaries: {str(e)}", exc_info=True)
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

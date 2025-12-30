@@ -36,8 +36,10 @@ export default function WorkItems() {
 
   const loadEntries = async () => {
     try {
-      const response = await workAPI.getWeekly();
-      setEntries(response.data);
+      // ✅ Get ALL entries, not just weekly
+      const response = await workAPI.getAll();
+      const allEntries = Array.isArray(response.data) ? response.data : (response.data?.results || []);
+      setEntries(allEntries.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
     } catch (error) {
       console.error('Error loading work entries:', error);
     } finally {

@@ -1,224 +1,242 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Sparkles, Copy, RefreshCw, Check } from 'lucide-react';
+import { FileText, Sparkles, Clock, TrendingUp, Calendar } from 'lucide-react';
 import { aiAPI } from '../services/api';
 import { format } from 'date-fns';
 
 export default function WeeklySummary() {
-  const [summary, setSummary] = useState(null);
+  const [currentSummary, setCurrentSummary] = useState(null);
+  const [previousSummaries, setPreviousSummaries] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedHistory, setSelectedHistory] = useState(null);
+
+  // Fetch previous summaries on page load
+  useEffect(() => {
+    fetchPreviousSummaries();
+  }, []);
+
+  const fetchPreviousSummaries = async () => {
+    try {
+      setLoadingHistory(true);
+      const response = await aiAPI.getSummaries();
+      const summaries = Array.isArray(response.data) ? response.data : [];
+      setPreviousSummaries(summaries.sort((a, b) => 
+        new Date(b.created_at) - new Date(a.created_at)
+      ));
+    } catch (err) {
+      console.error('Error fetching summaries:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
 
   const generateSummary = async () => {
     setLoading(true);
+    setError(null);
     try {
       const response = await aiAPI.generateWeeklySummary();
-      setSummary(response.data.summary);
-    } catch (error) {
-      console.error('Error generating summary:', error);
-      alert('Failed to generate summary. Make sure you have work entries logged!');
+      setCurrentSummary(response.data.summary);
+      // Refresh history
+      fetchPreviousSummaries();
+    } catch (err) {
+      console.error('Error generating summary:', err);
+      setError(err.response?.data?.detail || 'Failed to generate summary');
     } finally {
       setLoading(false);
     }
   };
 
-  const copyToClipboard = () => {
-    if (!summary) return;
-
-    const text = `
-Weekly Summary - Week of ${format(new Date(), 'MMM dd, yyyy')}
-
-${summary.narrative_summary || ''}
-
-🎯 KEY ACCOMPLISHMENTS:
-${summary.accomplishments?.map((item, i) => `${i + 1}. ${item}`).join('\n') || 'None'}
-
-📚 LEARNING HIGHLIGHTS:
-${summary.learnings?.map((item, i) => `${i + 1}. ${item}`).join('\n') || 'None'}
-
-🚧 BLOCKERS & IMPACT:
-${summary.blockers_impact?.map((item, i) => `${i + 1}. ${item}`).join('\n') || 'None'}
-
-💡 INITIATIVE SHOWN:
-${summary.initiative?.map((item, i) => `${i + 1}. ${item}`).join('\n') || 'None'}
-
-📊 TIME BREAKDOWN:
-- Coding: ${summary.time_breakdown?.coding || 0}%
-- Meetings: ${summary.time_breakdown?.meetings || 0}%
-- Blocked: ${summary.time_breakdown?.blocked || 0}%
-- Learning: ${summary.time_breakdown?.learning || 0}%
-    `.trim();
-
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
   };
 
   return (
-    <AppLayout
-      title="Weekly Summary"
-      subtitle={`Week of ${format(new Date(), 'MMMM dd, yyyy')}`}
-    >
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-4 mb-6">
-        <Button
-          variant="hero"
-          onClick={generateSummary}
-          disabled={loading}
-          className="gap-2"
-        >
-          {loading ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              Generating...
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" />
-              Generate AI Summary
-            </>
-          )}
-        </Button>
-
-        {summary && (
-          <Button
-            variant="outline"
-            onClick={copyToClipboard}
-            className="gap-2"
-          >
-            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            {copied ? 'Copied!' : 'Copy to Clipboard'}
-          </Button>
-        )}
-      </div>
-
-      {!summary && !loading && (
-        <div className="bg-card rounded-xl p-12 card-shadow text-center animate-fade-in">
-          <Sparkles className="mx-auto text-accent mb-4 h-12 w-12" />
-          <h3 className="text-xl font-bold text-foreground mb-2">Ready to Impress Your Manager?</h3>
-          <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-            Click the button above to generate an AI-powered summary of your week's work.
-            Perfect for status updates and 1-on-1s!
-          </p>
+    <AppLayout title="Weekly Summary" subtitle="AI-powered overview of your week">
+      {error && (
+        <div className="bg-danger/10 border border-danger/30 text-danger px-4 py-3 rounded-lg mb-4">
+          {error}
         </div>
       )}
 
-      {loading && (
-        <div className="bg-card rounded-xl p-12 card-shadow text-center animate-scale-in">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
-          <p className="text-foreground text-lg font-medium">AI is analyzing your week...</p>
-          <p className="text-muted-foreground text-sm mt-2">This usually takes 5-10 seconds</p>
-        </div>
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main Summary Section */}
+        <div className="lg:col-span-2">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-foreground">This Week's Summary</h2>
+            <Button
+              variant="hero"
+              onClick={generateSummary}
+              disabled={loading}
+              className="gap-2"
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  Generate Summary
+                </>
+              )}
+            </Button>
+          </div>
 
-      {summary && !loading && (
-        <div className="space-y-6 animate-fade-in">
-          {/* Narrative Summary */}
-          {summary.narrative_summary && (
-            <div className="bg-gradient-to-r from-primary/20 to-accent/20 rounded-xl p-6 card-shadow border border-primary/30">
-              <h3 className="text-lg font-semibold text-foreground mb-3">📝 Executive Summary</h3>
-              <p className="text-foreground leading-relaxed">{summary.narrative_summary}</p>
+          {!currentSummary && !loading && (
+            <div className="bg-card rounded-xl p-12 card-shadow text-center">
+              <FileText className="mx-auto text-accent mb-4 h-12 w-12" />
+              <h3 className="text-xl font-bold text-foreground mb-2">Ready for a summary?</h3>
+              <p className="text-muted-foreground mb-6">Click the button above to generate your weekly summary.</p>
             </div>
           )}
 
-          {/* Accomplishments */}
-          {summary.accomplishments && summary.accomplishments.length > 0 && (
-            <div className="bg-card rounded-xl p-6 card-shadow">
-              <h4 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                🎯 Key Accomplishments
-              </h4>
-              <ul className="space-y-3">
-                {summary.accomplishments.map((item, index) => (
-                  <li
-                    key={index}
-                    className="flex gap-3 p-3 rounded-lg bg-success/10 border border-success/20"
-                  >
-                    <span className="text-success font-bold flex-shrink-0">{index + 1}.</span>
-                    <span className="text-foreground">{item}</span>
-                  </li>
-                ))}
-              </ul>
+          {loading && (
+            <div className="bg-card rounded-xl p-12 card-shadow text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+              <p className="text-foreground text-lg font-medium">Analyzing your week...</p>
             </div>
           )}
 
-          {/* Learning Highlights */}
-          {summary.learnings && summary.learnings.length > 0 && (
-            <div className="bg-card rounded-xl p-6 card-shadow">
-              <h4 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                📚 Learning Highlights
-              </h4>
-              <ul className="space-y-3">
-                {summary.learnings.map((item, index) => (
-                  <li
-                    key={index}
-                    className="flex gap-3 p-3 rounded-lg bg-primary/10 border border-primary/20"
-                  >
-                    <span className="text-primary font-bold flex-shrink-0">{index + 1}.</span>
-                    <span className="text-foreground">{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {currentSummary && !loading && (
+            <div className="space-y-6">
+              {/* Accomplishments */}
+              {currentSummary.accomplishments && currentSummary.accomplishments.length > 0 && (
+                <div className="bg-card rounded-xl p-6 card-shadow">
+                  <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-success" />
+                    Accomplishments
+                  </h3>
+                  <ul className="space-y-2">
+                    {currentSummary.accomplishments.map((item, idx) => (
+                      <li key={idx} className="flex gap-3 text-foreground">
+                        <span className="text-success font-bold">✓</span>
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
-          {/* Blockers */}
-          {summary.blockers_impact && summary.blockers_impact.length > 0 && (
-            <div className="bg-card rounded-xl p-6 card-shadow">
-              <h4 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                🚧 Blockers & Their Impact
-              </h4>
-              <ul className="space-y-3">
-                {summary.blockers_impact.map((item, index) => (
-                  <li
-                    key={index}
-                    className="flex gap-3 p-3 rounded-lg bg-danger/10 border border-danger/20"
-                  >
-                    <span className="text-danger font-bold flex-shrink-0">{index + 1}.</span>
-                    <span className="text-foreground">{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+              {/* Learnings */}
+              {currentSummary.learnings && currentSummary.learnings.length > 0 && (
+                <div className="bg-card rounded-xl p-6 card-shadow">
+                  <h3 className="text-lg font-bold text-foreground mb-4">🎓 Learnings</h3>
+                  <ul className="space-y-2">
+                    {currentSummary.learnings.map((item, idx) => (
+                      <li key={idx} className="text-foreground">• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
-          {/* Initiative */}
-          {summary.initiative && summary.initiative.length > 0 && (
-            <div className="bg-card rounded-xl p-6 card-shadow">
-              <h4 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                💡 Initiative Shown
-              </h4>
-              <ul className="space-y-3">
-                {summary.initiative.map((item, index) => (
-                  <li
-                    key={index}
-                    className="flex gap-3 p-3 rounded-lg bg-accent/10 border border-accent/20"
-                  >
-                    <span className="text-accent font-bold flex-shrink-0">{index + 1}.</span>
-                    <span className="text-foreground">{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+              {/* Blockers Impact */}
+              {currentSummary.blockers_impact && currentSummary.blockers_impact.length > 0 && (
+                <div className="bg-card rounded-xl p-6 card-shadow border-l-4 border-danger">
+                  <h3 className="text-lg font-bold text-foreground mb-4">⚠️ Blockers Impact</h3>
+                  <ul className="space-y-2">
+                    {currentSummary.blockers_impact.map((item, idx) => (
+                      <li key={idx} className="text-foreground">• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
-          {/* Time Breakdown */}
-          {summary.time_breakdown && (
-            <div className="bg-card rounded-xl p-6 card-shadow">
-              <h4 className="text-lg font-bold text-foreground mb-4">📊 Time Breakdown</h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {Object.entries(summary.time_breakdown).map(([key, value]) => (
-                  <div key={key} className="text-center p-4 rounded-lg bg-secondary">
-                    <div className="text-3xl font-bold text-primary">{value}%</div>
-                    <div className="text-sm text-muted-foreground capitalize mt-1">{key}</div>
+              {/* Time Breakdown */}
+              {currentSummary.time_breakdown && (
+                <div className="bg-card rounded-xl p-6 card-shadow">
+                  <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                    <Clock className="w-5 h-5" />
+                    Time Breakdown
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {Object.entries(currentSummary.time_breakdown).map(([key, value]) => (
+                      <div key={key} className="bg-secondary rounded-lg p-3 text-center">
+                        <p className="text-xs text-muted-foreground capitalize">{key}</p>
+                        <p className="text-lg font-bold text-foreground">{value}%</p>
+                      </div>
+                    ))}
                   </div>
+                </div>
+              )}
+
+              {/* Narrative Summary */}
+              {currentSummary.narrative_summary && (
+                <div className="bg-accent/10 border border-accent/20 rounded-xl p-6">
+                  <p className="text-foreground leading-relaxed italic">
+                    "{currentSummary.narrative_summary}"
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Previous Summaries Sidebar */}
+        <div className="lg:col-span-1">
+          <div className="bg-card rounded-xl p-6 card-shadow sticky top-4">
+            <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+              <Calendar className="w-5 h-5" />
+              Previous Summaries
+            </h3>
+
+            {loadingHistory ? (
+              <p className="text-sm text-muted-foreground">Loading...</p>
+            ) : previousSummaries.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No previous summaries yet</p>
+            ) : (
+              <div className="space-y-2">
+                {previousSummaries.map((summary) => (
+                  <button
+                    key={summary.id}
+                    onClick={() => setSelectedHistory(summary)}
+                    className={`w-full text-left p-3 rounded-lg transition-all ${
+                      selectedHistory?.id === summary.id
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-secondary hover:bg-secondary/80 text-foreground'
+                    }`}
+                  >
+                    <p className="font-medium text-sm">
+                      Week of {formatDate(summary.week_start)}
+                    </p>
+                    <p className="text-xs opacity-75 mt-1">
+                      {formatDate(summary.created_at)}
+                    </p>
+                  </button>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+
+            {/* Selected History Detail */}
+            {selectedHistory && (
+              <div className="mt-6 pt-6 border-t border-border">
+                <h4 className="font-semibold text-foreground mb-3 text-sm">
+                  Week of {formatDate(selectedHistory.week_start)}
+                </h4>
+                <div className="space-y-2 text-sm">
+                  {selectedHistory.summary_json?.narrative_summary && (
+                    <p className="text-muted-foreground italic">
+                      "{selectedHistory.summary_json.narrative_summary}"
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Generated: {formatDate(selectedHistory.created_at)}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </AppLayout>
   );
 }

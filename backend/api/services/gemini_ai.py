@@ -3,7 +3,6 @@ import json
 import logging
 import time
 from google import genai
-from google.api_core import exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +15,9 @@ class GeminiAIService:
         
         self.api_keys = [key.strip() for key in api_keys_str.split(',')]
         self.current_key_index = 0
+        self.model = "gemini-flash-latest"
         self.clients = [genai.Client(api_key=key) for key in self.api_keys]
         self.last_request_time = 0
-        self.model = "gemini-flash-latest"  # Use gemini-2.0-flash-lite instead
 
     def _get_next_client(self):
         """Rotate to next API key"""
@@ -213,3 +212,81 @@ Return ONLY JSON (no markdown):
                 break
         
         return {"skills": []}
+
+    def analyze_skill_gaps(self, user_skills, company_tech_stack, work_entries):
+        """Analyze skill gaps between user and company tech stack"""
+        user_skills_text = ", ".join([
+            f"{skill['skill_name']} (Level {skill['confidence_level']})"
+            for skill in user_skills
+        ]) or "No skills tracked yet"
+        
+        company_stack_text = ", ".join(company_tech_stack) if company_tech_stack else "No tech stack defined"
+        
+        recent_work = "\n".join([
+            f"- {entry['title']} ({entry['entry_type']}, {entry['hours_spent']}hrs)"
+            for entry in work_entries[:15]
+        ]) or "No recent work"
+        
+        prompt = f"""Analyze this intern's skill development and provide actionable recommendations.
+
+USER'S CURRENT SKILLS:
+{user_skills_text}
+
+COMPANY'S TECH STACK:
+{company_stack_text}
+
+RECENT WORK:
+{recent_work}
+
+Return ONLY valid JSON (no markdown):
+{{
+    "gaps": [
+        {{
+            "skill": "Docker",
+            "priority": "high",
+            "reason": "Used heavily by team but you haven't practiced it",
+            "suggestion": "Complete Docker fundamentals course this week"
+        }}
+    ],
+    "strengths": ["React", "Python"],
+    "work_distribution": {{
+        "frontend": 60,
+        "backend": 30,
+        "devops": 5,
+        "testing": 5
+    }},
+    "recommendations": [
+        "Balance backend work - you're 70% frontend focused",
+        "Try pair programming on backend tasks to learn Django patterns"
+    ],
+    "next_learning_goals": ["Master PostgreSQL queries", "Learn CI/CD basics"]
+}}"""
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                self._rate_limit(2.0)
+                client = self._get_next_client()
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=prompt
+                )
+                logger.info(f"Gap analysis generated (Key #{self.current_key_index + 1})")
+                return self._clean_json_response(response.text)
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                    logger.warning(f"Rate limited on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        self._exponential_backoff(attempt)
+                        continue
+                logger.error(f"Error in gap analysis: {error_str}", exc_info=True)
+                break
+        
+        return {
+            "gaps": [],
+            "strengths": [],
+            "work_distribution": {},
+            "recommendations": ["Unable to generate analysis at this time"],
+            "next_learning_goals": []
+        }

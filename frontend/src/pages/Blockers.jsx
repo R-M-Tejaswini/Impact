@@ -5,7 +5,7 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
 import { Plus, Clock, User, CheckCircle2, Trash2, X, AlertTriangle } from 'lucide-react';
-import { blockerAPI } from '../services/api';
+import { blockerAPI } from '../services/api';  // Correct import
 import { cn } from '../lib/utils';
 
 export default function Blockers() {
@@ -16,33 +16,36 @@ export default function Blockers() {
   const [error, setError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
-    title: '', // Changed from 'blocker' to 'title'
+    title: '',
     blocking_reason: '',
     waiting_on: '',
     hours_lost: 0,
     status: 'active',
   });
 
-  // Fetch all blockers
+  // Fetch all blockers on page load
   useEffect(() => {
-    const fetchBlockers = async () => {
-      try {
-        setLoading(true);
-        const response = await blockerAPI.getAll();
-        const data = Array.isArray(response.data) ? response.data : [];
-        setBlockers(data);
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching blockers:', err);
-        setError(err.message);
-        setBlockers([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchBlockers();
   }, []);
+
+  const fetchBlockers = async () => {
+    try {
+      setLoading(true);
+      const response = await blockerAPI.getAll();
+      console.log('Blockers response:', response.data);
+      
+      // Extract results from paginated response
+      const data = response.data.results ? response.data.results : [];
+      setBlockers(data);
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching blockers:', err);
+      setError(err.message);
+      setBlockers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Filter active and resolved blockers
   useEffect(() => {
@@ -60,7 +63,7 @@ export default function Blockers() {
       const response = await blockerAPI.create(formData);
       setBlockers([...blockers, response.data]);
       setFormData({
-        title: '', // Reset with 'title'
+        title: '',
         blocking_reason: '',
         waiting_on: '',
         hours_lost: 0,
